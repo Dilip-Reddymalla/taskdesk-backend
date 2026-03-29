@@ -155,26 +155,34 @@ async function updateUserStreak(userId) {
   await user.save();
 }
 
-async function getUserPlans(req,res){
-  const userId = req.user.id;
-  if(!userId){
-    return res.status(401).json({
-      message:"Invalid user",
-    });
-  }
-  const plans = await planModel.find({owner: userId});
-  if(!plans){
-    return res.status(400).json({
-      message:"No plans found in userID",
-    });
-  }
-  res.status(200).json(
-    {
-      message:"Fetched plans in the userID",
+async function getUserPlans(req, res) {
+  try {
+    const userId = req.user.id;
+    if (!userId) {
+      return res.status(401).json({
+        message: "Invalid user",
+      });
+    }
+    const plans = await planModel.find({ owner: userId });
+    if (!plans) {
+      return res.status(400).json({
+        message: "No plans found in userID",
+      });
+    }
+    res.status(200).json({
+      message: "Fetched plans in the userID",
       length: plans.length,
       plans,
-    },
-  );
+    });
+  } catch (error) {
+    res.status(500).json({ message: error });
+  }
 }
 
-module.exports = { createPlan, deletePlan, updatePlanStreak, updateUserStreak, getUserPlans };
+module.exports = {
+  createPlan,
+  deletePlan,
+  updatePlanStreak,
+  updateUserStreak,
+  getUserPlans,
+};

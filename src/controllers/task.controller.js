@@ -127,4 +127,32 @@ async function completeTask(req, res) {
   }
 }
 
-module.exports = { createTask, completeTask };
+async function getPendingTasks(req, res) {
+  try {
+    const userId = req.user.id;
+  if (!userId) {
+    return res.status(401).json({
+      message: "Invalid user",
+    });
+  }
+  const tasks = await TaskInstance.find({
+    assignedTo: userId,
+    isCompleted: false,
+  });
+  if (!tasks) {
+    return res.status(401).json({ message: "No tasks find in userID" });
+  }
+  res.status(200).json({
+    message: "Tasks fetched",
+    length: tasks.length,
+    tasks,
+  });
+  } catch (error) {
+    res.status(500).json({
+      message:error,
+    });
+  }
+  
+}
+
+module.exports = { createTask, completeTask, getPendingTasks };
