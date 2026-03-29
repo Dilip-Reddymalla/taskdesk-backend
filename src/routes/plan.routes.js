@@ -7,6 +7,7 @@ const router = express.Router();
 
 router.post("/post",protect,planContoller.createPlan);
 router.delete("/delete/:slug",protect,planContoller.deletePlan);
+router.get("/get",protect,planContoller.getUserPlans);
 
 
 module.exports = router;

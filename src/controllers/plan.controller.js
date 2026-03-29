@@ -155,4 +155,26 @@ async function updateUserStreak(userId) {
   await user.save();
 }
 
-module.exports = { createPlan, deletePlan, updatePlanStreak, updateUserStreak };
+async function getUserPlans(req,res){
+  const userId = req.user.id;
+  if(!userId){
+    return res.status(401).json({
+      message:"Invalid user",
+    });
+  }
+  const plans = await planModel.find({owner: userId});
+  if(!plans){
+    return res.status(400).json({
+      message:"No plans found in userID",
+    });
+  }
+  res.status(200).json(
+    {
+      message:"Fetched plans in the userID",
+      length: plans.length,
+      plans,
+    },
+  );
+}
+
+module.exports = { createPlan, deletePlan, updatePlanStreak, updateUserStreak, getUserPlans };
