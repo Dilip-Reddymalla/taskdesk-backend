@@ -1,0 +1,56 @@
+# Node dependencies
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Runtime data
+dist/
+build/
+tmp/
+temp/
+out/
+coverage/
+logs/
+*.log
+*.log.*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE / editor settings
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.code-workspace
+
+# npm lock artifacts
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Optional: API/artifacts
+*.tgz
+*.zip
+*.tar.gz
+
+# Misc
+.sass-cache/
+.cache/
+dist-ssr/
+public/bundle/
+*.seed
