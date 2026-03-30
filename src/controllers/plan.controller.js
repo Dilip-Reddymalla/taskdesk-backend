@@ -164,8 +164,8 @@ async function getUserPlans(req, res) {
       });
     }
     const plans = await planModel.find({ owner: userId });
-    if (!plans) {
-      return res.status(400).json({
+    if (!plans || plans.length === 0) {
+      return res.status(404).json({
         message: "No plans found in userID",
       });
     }

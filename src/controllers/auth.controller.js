@@ -5,49 +5,54 @@ const Plan = require("../models/plan.model.js");
 const Task = require("../models/task.model.js");
 
 async function registerUser(req, res) {
-  let { username, email, password, role } = req.body;
-  if (!role) {
-    role = "user";
+  try {
+    let { username, email, password, role } = req.body;
+    if (!role) {
+      role = "user";
+    }
+    const isUserAlreadyExists = await userModel.findOne({
+      $or: [{ username }, { email }],
+    });
+
+    if (isUserAlreadyExists) {
+      return res.status(409).json({ message: "User already exists" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const user = await userModel.create({
+      username,
+      email,
+      password: hashedPassword,
+      role: role,
+    });
+
+    const token = jwt.sign(
+      {
+        id: user._id,
+        username: user.username,
+        role: user.role,
+        status: user.status,
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "1d",
+      },
+    );
+
+    res.status(201).json({
+      message: "User Created succesfully",
+      user: {
+        username: user.username,
+        email: user.email,
+        role: user.role,
+      },
+      token,
+    });
+  } catch (error) {
+    console.error("[Auth Controller - Register User Error]:", error);
+    res.status(500).json({ message: "Server error" });
   }
-  const isUserAlreadyExists = await userModel.findOne({
-    $or: [{ username }, { email }],
-  });
-
-  if (isUserAlreadyExists) {
-    return res.status(409).json({ message: "User already exists" });
-  }
-
-  const hashedPassword = await bcrypt.hash(password, 10);
-
-  const user = await userModel.create({
-    username,
-    email,
-    password: hashedPassword,
-    role: role,
-  });
-
-  const token = jwt.sign(
-    {
-      id: user._id,
-      username:user.username,
-      role: user.role,
-      status: user.status,
-    },
-    process.env.JWT_SECRET,
-    {
-      expiresIn: "1d",
-    },
-  );
-
-  res.status(201).json({
-    message: "User Created succesfully",
-    user: {
-      username: user.username,
-      email: user.email,
-      role: user.role,
-    },
-    token,
-  });
 }
 async function loginUser(req, res) {
   try {
@@ -98,7 +103,8 @@ async function loginUser(req, res) {
         status: user.status,
       },
     });
-  } catch {
+  } catch (error) {
+    console.error("[Auth Controller - Login User Error]:", error);
     res.status(500).json({
       message: "Server error",
     });
@@ -132,7 +138,8 @@ async function deleteUser(req, res) {
     return res.status(200).json({
       message: "User deleted successfully",
     });
-  } catch {
+  } catch (error) {
+    console.error("[Auth Controller - Delete User Error]:", error);
     res.status(500).json({
       message: "Server error",
     });

@@ -106,13 +106,15 @@ async function completeTask(req, res) {
     const { taskId } = req.params;
     const userId = req.user.id;
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
 
     let instance = await TaskInstance.findOne({
       task: taskId,
       assignedTo: userId,
-      date: today,
+      date: { $gte: startOfDay, $lte: endOfDay },
     });
 
     if (!instance) {
@@ -126,7 +128,7 @@ async function completeTask(req, res) {
         task: taskId,
         plan: task.plan,
         assignedTo: userId,
-        date: today,
+        date: startOfDay,
       });
     }
 
@@ -135,11 +137,7 @@ async function completeTask(req, res) {
       instance.completedAt = new Date();
       await instance.save();
 
-      const user = await User.findById(userId);
-      if (user) {
-        user.xp += 10;
-        await user.save();
-      }
+      await User.findByIdAndUpdate(userId, { $inc: { xp: 10 } });
     }
 
     await planContoller.updatePlanStreak(instance.plan);
@@ -167,8 +165,8 @@ async function getPendingTasks(req, res) {
       assignedTo: userId,
       isCompleted: false,
     });
-    if (!tasks) {
-      return res.status(401).json({ message: "No tasks find in userID" });
+    if (!tasks || tasks.length === 0) {
+      return res.status(404).json({ message: "No tasks found for userID" });
     }
     res.status(200).json({
       message: "Tasks fetched",
@@ -194,8 +192,8 @@ async function getCompletedTasks(req, res) {
       assignedTo: userId,
       isCompleted: true,
     });
-    if (!tasks) {
-      return res.status(401).json({ message: "No tasks find in userID" });
+    if (!tasks || tasks.length === 0) {
+      return res.status(404).json({ message: "No tasks found for userID" });
     }
     res.status(200).json({
       message: "Tasks fetched",
@@ -228,7 +226,7 @@ async function deleteTask(req, res) {
     await TaskInstance.deleteMany({
       task: taskId,
       date: { $gte: today },
-      status: { $ne: "completed" },
+      isCompleted: false,
     });
 
     await task.deleteOne();
