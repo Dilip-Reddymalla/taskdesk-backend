@@ -208,10 +208,41 @@ async function getCompletedTasks(req, res) {
     });
   }
 }
+async function deleteTask(req, res) {
+  try {
+    const taskId = req.params.taskId;
+    const userId = req.user.id;
+    if (!taskId) {
+      return res.status(401).json({ message: "taskId is required" });
+    }
+    const task = await Task.findById(taskId);
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+    if (task.createdBy.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "user does not have access" });
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // normalize to start of day
+
+    await TaskInstance.deleteMany({
+      task: taskId,
+      date: { $gte: today },
+      status: { $ne: "completed" },
+    });
+
+    await task.deleteOne();
+    res.status(200).json({ message: "task deleted" });
+  } catch (error) {
+    console.log("[task contriller]:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
 
 module.exports = {
   createTask,
   completeTask,
   getPendingTasks,
   getCompletedTasks,
+  deleteTask,
 };
