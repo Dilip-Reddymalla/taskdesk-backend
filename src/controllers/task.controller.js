@@ -9,7 +9,15 @@ async function createTask(req, res) {
     const { planId } = req.params;
     const userId = req.user.id;
 
-    let { title, description, assignedTo, priority, recurrence } = req.body;
+    let {
+      title,
+      description,
+      assignedTo,
+      priority,
+      recurrence,
+      startDate,
+      endDate,
+    } = req.body;
 
     const plan = await Plan.findById(planId);
 
@@ -31,8 +39,12 @@ async function createTask(req, res) {
       });
     }
 
-    if (!assignedTo || assignedTo.length === 0) {
-      assignedTo = [userId];
+    assignedTo = assignedTo?.length ? assignedTo : [userId];
+
+    if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
+      return res.status(400).json({
+        message: "Start date cannot be after end date",
+      });
     }
 
     const users = await User.find({
@@ -62,6 +74,22 @@ async function createTask(req, res) {
       priority,
       recurrence,
     });
+
+    if (startDate && endDate) {
+      let current = new Date(startDate);
+      const end = new Date(endDate);
+
+      while (current <= end) {
+        await TaskInstance.create({
+          task: task._id,
+          plan: task.plan,
+          assignedTo: userId,
+          date: new Date(current),
+        });
+
+        current.setDate(current.getDate() + 1);
+      }
+    }
 
     res.status(201).json({
       message: "Task created successfully",
@@ -130,29 +158,60 @@ async function completeTask(req, res) {
 async function getPendingTasks(req, res) {
   try {
     const userId = req.user.id;
-  if (!userId) {
-    return res.status(401).json({
-      message: "Invalid user",
+    if (!userId) {
+      return res.status(401).json({
+        message: "Invalid user",
+      });
+    }
+    const tasks = await TaskInstance.find({
+      assignedTo: userId,
+      isCompleted: false,
     });
-  }
-  const tasks = await TaskInstance.find({
-    assignedTo: userId,
-    isCompleted: false,
-  });
-  if (!tasks) {
-    return res.status(401).json({ message: "No tasks find in userID" });
-  }
-  res.status(200).json({
-    message: "Tasks fetched",
-    length: tasks.length,
-    tasks,
-  });
+    if (!tasks) {
+      return res.status(401).json({ message: "No tasks find in userID" });
+    }
+    res.status(200).json({
+      message: "Tasks fetched",
+      length: tasks.length,
+      tasks,
+    });
   } catch (error) {
     res.status(500).json({
-      message:error,
+      message: error,
     });
   }
-  
 }
 
-module.exports = { createTask, completeTask, getPendingTasks };
+async function getCompletedTasks(req, res) {
+  try {
+    const userId = req.user.id;
+    if (!userId) {
+      return res.status(401).json({
+        message: "Invalid user",
+      });
+    }
+    const tasks = await TaskInstance.find({
+      assignedTo: userId,
+      isCompleted: true,
+    });
+    if (!tasks) {
+      return res.status(401).json({ message: "No tasks find in userID" });
+    }
+    res.status(200).json({
+      message: "Tasks fetched",
+      length: tasks.length,
+      tasks,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: error,
+    });
+  }
+}
+
+module.exports = {
+  createTask,
+  completeTask,
+  getPendingTasks,
+  getCompletedTasks,
+};

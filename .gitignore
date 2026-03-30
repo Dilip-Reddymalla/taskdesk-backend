@@ -7,6 +7,9 @@ package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
+#docs
+remaining_endpoints.txt
+
 # Runtime data
 dist/
 build/

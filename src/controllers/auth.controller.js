@@ -29,6 +29,7 @@ async function registerUser(req, res) {
   const token = jwt.sign(
     {
       id: user._id,
+      username:user.username,
       role: user.role,
       status: user.status,
     },
@@ -71,6 +72,7 @@ async function loginUser(req, res) {
     const token = jwt.sign(
       {
         id: user._id,
+        username: user.username,
         role: user.role,
         status: user.status,
       },
@@ -102,7 +104,6 @@ async function loginUser(req, res) {
     });
   }
 }
-
 async function deleteUser(req, res) {
   try {
     const userId = req.user.id;
