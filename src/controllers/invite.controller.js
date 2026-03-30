@@ -73,5 +73,28 @@ async function sendInvite(req, res) {
     return res.status(500).json({ message: "Server error" });
   }
 }
-
-module.exports = { sendInvite };
+async function getPendingInvites(req, res) {
+  try {
+    const userID = req.user.id;
+    const invites = await inviteModel
+      .find({ receiver: userID, status: "pending" })
+      .populate("sender", "username email")
+      .populate("plan", "title");
+    if (invites.length === 0) {
+      res.status(200).json({
+        message: "No pending invites",
+        length: 0,
+        invites: [],
+      });
+    }
+    res.status(200).json({
+      message: "pending invites",
+      length: invites.length,
+      invites,
+    });
+  } catch (error) {
+    console.log("[invite controller]:", error);
+    res.status(500).json({ message: "server error" });
+  }
+}
+module.exports = { sendInvite, getPendingInvites };

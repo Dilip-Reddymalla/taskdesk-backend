@@ -6,3 +6,4 @@ const inviteContoller = require("../controllers/invite.controller");
 const router = express.Router();
 
 router.post("/send",protect,inviteContoller.sendInvite);
+router.get("/pending",protect,inviteContoller.getPendingInvites);
