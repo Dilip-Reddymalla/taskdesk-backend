@@ -10,3 +10,5 @@ const router = express.Router();
 router.get("/get", protect, notificationController.getNotification);
 router.patch("/read/:notificationId", protect, notificationController.markAsRead);
 router.patch("/read-all", protect, notificationController.markAllAsRead);
+
+module.exports = router;
