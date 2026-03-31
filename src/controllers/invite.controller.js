@@ -147,4 +147,34 @@ async function acceptInvite(req, res) {
     return res.status(500).json({ message: "Server error" });
   }
 }
-module.exports = { sendInvite, getPendingInvites, acceptInvite };
+async function rejectInvite(req, res) {
+  try {
+    const userId = req.user.id;
+    const inviteId = req.params.inviteId;
+    if (!userId) {
+      return res.status(400).json({ message: "user id required" });
+    }
+    if (!inviteId) {
+      return res.status(400).json({ message: "invite id required" });
+    }
+    const invite = await inviteModel.findById(inviteId);
+    if (!invite) {
+      return res.status(404).json({ message: "Invite not found" });
+    }
+    if (invite.status !== "pending") {
+      return res.status(400).json({ message: "invite already used" });
+    }
+    if (userId.toString() !== invite.receiver.toString()) {
+      return res
+        .status(403)
+        .json({ message: "the invite does not belong to you" });
+    }
+    invite.status = "rejected";
+    await invite.save();
+    return res.status(200).json({ message: "Invite rejected" });
+  } catch (error) {
+    console.log("[invite controller:]", error);
+    return res.status(500).json({ message: "server error" });
+  }
+}
+module.exports = { sendInvite, getPendingInvites, acceptInvite, rejectInvite };
