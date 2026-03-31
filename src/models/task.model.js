@@ -58,7 +58,6 @@ const taskSchema = new mongoose.Schema(
 
       endDate: {
         type: Date,
-        required: true,
       },
     },
   },

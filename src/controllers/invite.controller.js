@@ -2,6 +2,7 @@ const userModel = require("../models/user.model");
 const inviteModel = require("../models/invite.model");
 const notificationModel = require("../models/notification.model");
 const planModel = require("../models/plan.model");
+const { getIO } = require("../socket");
 
 async function sendInvite(req, res) {
   try {
@@ -37,7 +38,7 @@ async function sendInvite(req, res) {
         message: "You are not part of this plan",
       });
     }
-    if (plan.members.includes(reciver._id)) {
+    if (plan.members.some(member => member.toString() === reciver._id.toString())) {
       return res.status(400).json({
         message: "User is already a member of the plan",
       });
@@ -68,6 +69,13 @@ async function sendInvite(req, res) {
       invite,
       notification,
     });
+
+    try {
+      getIO().to(`user_${reciver._id}`).emit("invite_received", invite);
+    } catch (err) {
+      console.log("Socket emit failed", err.message);
+    }
+
   } catch (error) {
     console.log("Server Error", error);
     return res.status(500).json({ message: "Server error" });
@@ -81,7 +89,7 @@ async function getPendingInvites(req, res) {
       .populate("sender", "username email")
       .populate("plan", "title");
     if (invites.length === 0) {
-      res.status(200).json({
+      return res.status(200).json({
         message: "No pending invites",
         length: 0,
         invites: [],
@@ -141,6 +149,13 @@ async function acceptInvite(req, res) {
     await plan.save();
     invite.status = "accepted";
     await invite.save();
+
+    try {
+      getIO().to(`plan_${planId}`).emit("member_joined", { userId });
+    } catch (err) {
+      console.log("Socket emit failed", err.message);
+    }
+
     res.status(200).json({ message: "invite accepted" });
   } catch (error) {
     console.log("[invite controller]:", error);

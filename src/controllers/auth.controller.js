@@ -6,10 +6,8 @@ const Task = require("../models/task.model.js");
 
 async function registerUser(req, res) {
   try {
-    let { username, email, password, role } = req.body;
-    if (!role) {
-      role = "user";
-    }
+    let { username, email, password } = req.body;
+
     const isUserAlreadyExists = await userModel.findOne({
       $or: [{ username }, { email }],
     });
@@ -24,7 +22,7 @@ async function registerUser(req, res) {
       username,
       email,
       password: hashedPassword,
-      role: role,
+      role: "user",
     });
 
     const token = jwt.sign(
@@ -146,4 +144,20 @@ async function deleteUser(req, res) {
   }
 }
 
-module.exports = { registerUser, loginUser, deleteUser };
+async function verifyToken(req, res) {
+  try {
+    const user = await userModel.findById(req.user.id).select("-password");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.status(200).json({
+      valid: true,
+      user,
+    });
+  } catch (error) {
+    console.error("[Auth Controller - Verify Token Error]:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+module.exports = { registerUser, loginUser, deleteUser, verifyToken };

@@ -8,7 +8,7 @@ async function getProfileInfo(req, res) {
     }
     const user = await userModel.findById(userId).select("-password");
     if (!user) {
-      return res.status(404).message({ message: "User not found" });
+      return res.status(404).json({ message: "User not found" });
     }
     res.status(200).json({
       message: "user found",

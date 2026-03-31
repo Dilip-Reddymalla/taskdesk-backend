@@ -3,18 +3,28 @@ const notificationModel = require("../models/notification.model");
 async function getNotification(req, res) {
   try {
     const userId = req.user.id;
-    const notifications = await notificationModel
-      .find({ user: userId, isRead: false })
-      .sort({ createdAt: -1 })
-      .limit(20)
-      .skip(0);
-    if (notifications.length === 0) {
-      return res
-        .status(404)
-        .json({ message: " Notifications not found in user id" });
-    }
+    const page = parseInt(req.query.page) || 1;
+    const limit = 20;
+    const skip = (page - 1) * limit;
+    const showRead = req.query.showRead === "true";
+
+    // By default fetch unread only. Pass ?showRead=true to get all notifications.
+    const filter = showRead ? { user: userId } : { user: userId, isRead: false };
+
+    const [notifications, total] = await Promise.all([
+      notificationModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      notificationModel.countDocuments(filter),
+    ]);
+
     return res.status(200).json({
       message: "Notification fetched",
+      page,
+      totalPages: Math.ceil(total / limit),
+      totalCount: total,
       notifications,
     });
   } catch (error) {
@@ -22,6 +32,7 @@ async function getNotification(req, res) {
     return res.status(500).json({ message: "server Error" });
   }
 }
+
 async function markAsRead(req, res) {
   try {
     const notificationId = req.params.notificationId;
@@ -49,4 +60,21 @@ async function markAsRead(req, res) {
   }
 }
 
-module.exports = { getNotification, markAsRead };
+async function markAllAsRead(req, res) {
+  try {
+    const userId = req.user.id;
+    const result = await notificationModel.updateMany(
+      { user: userId, isRead: false },
+      { isRead: true }
+    );
+    return res.status(200).json({
+      message: "All notifications marked as read",
+      updatedCount: result.modifiedCount,
+    });
+  } catch (error) {
+    console.log("[notification controller]:", error);
+    return res.status(500).json({ message: "server error" });
+  }
+}
+
+module.exports = { getNotification, markAsRead, markAllAsRead };

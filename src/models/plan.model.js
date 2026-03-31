@@ -30,12 +30,13 @@ const planSchema = new mongoose.Schema(
       },
     ],
 
-    streak: {
+    streakCount: {
       type: Number,
       default: 0,
     },
     lastCompletedDate: {
       type: Date,
+      default: null,
     },
 
     isShared: {

@@ -1,0 +1,379 @@
+================================================================================
+  TASK DESK - API DOCUMENTATION
+  Base URL: http://localhost:3000/api
+  Auth: Pass JWT in header → Authorization: Bearer <token>
+        OR as a cookie named "token"
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 1. AUTH — /api/auth
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── POST /api/auth/register ─────────────────────────────────────────────────────
+  Purpose : Create a new user account
+  Auth    : Not required
+  Body    : {
+              "username": "dilip123",     (required, 3–30 chars)
+              "email":    "d@mail.com",   (required)
+              "password": "secret123"    (required, min 6 chars)
+            }
+  Success : 201 → { message, user: { username, email, role }, token }
+  Errors  : 409 → User already exists
+
+── POST /api/auth/login ────────────────────────────────────────────────────────
+  Purpose : Login with username or email + password
+  Auth    : Not required
+  Body    : {
+              "username": "dilip123",    (use username OR email, not both required)
+              "email":    "d@mail.com",
+              "password": "secret123"    (required)
+            }
+  Success : 200 → { message, token, user: { id, username, email, role, status } }
+            Note: token is also set as an httpOnly cookie automatically
+  Errors  : 401 → User not found / Invalid credentials
+
+── GET /api/auth/me ────────────────────────────────────────────────────────────
+  Purpose : Verify token validity + get fresh user data (use on app reload)
+  Auth    : Required
+  Body    : none
+  Success : 200 → { valid: true, user: { ...all fields except password } }
+  Errors  : 401 → Token invalid/missing, 404 → User not found
+
+── DELETE /api/auth/deleteUser ─────────────────────────────────────────────────
+  Purpose : Permanently delete your own account and all owned plans/tasks
+  Auth    : Required
+  Body    : { "password": "secret123" }   (required to confirm identity)
+  Success : 200 → { message: "User deleted successfully" }
+  Errors  : 401 → Invalid password, 404 → User not found
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 2. USER — /api/user
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── GET /api/user/profile ───────────────────────────────────────────────────────
+  Purpose : Get your own profile info (XP, streak, avatar, etc.)
+  Auth    : Required
+  Body    : none
+  Success : 200 → { message, user: { username, email, xp, streakCount, avatar, ... } }
+  Errors  : 404 → User not found
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 3. PLANS — /api/plan
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── POST /api/plan/post ─────────────────────────────────────────────────────────
+  Purpose : Create a new plan (workspace/project). Creator is automatically owner
+            and is added to members list.
+  Auth    : Required
+  Body    : {
+              "title":       "My Project",       (required)
+              "description": "Optional desc"
+            }
+  Success : 201 → { message, plan: { _id, title, slug, owner, members, ... } }
+  Errors  : 400 → Title required, 403 → Banned user
+
+── GET /api/plan/get ───────────────────────────────────────────────────────────
+  Purpose : Get all plans where the user is a member (owned + joined via invite)
+  Auth    : Required
+  Body    : none
+  Success : 200 → { message, length, plans: [ { ...plan, owner: { username, avatar } } ] }
+
+── GET /api/plan/:planId ───────────────────────────────────────────────────────
+  Purpose : Get detailed info for one specific plan, with all members populated
+  Auth    : Required (must be a member of the plan)
+  Params  : planId → MongoDB ObjectId of the plan
+  Body    : none
+  Success : 200 → { message, plan: { ...plan, members: [ { username, email, xp, streakCount } ] } }
+  Errors  : 403 → Not a member, 404 → Plan not found
+
+── DELETE /api/plan/delete/:slug ───────────────────────────────────────────────
+  Purpose : Delete a plan entirely (owner only)
+  Auth    : Required (must be owner)
+  Params  : slug → the URL slug of the plan (returned on creation)
+  Body    : none
+  Success : 200 → { message: "Plan deleted" }
+  Errors  : 401 → Not authorized, 404 → Plan not found
+
+── DELETE /api/plan/:planId/member/:memberId ───────────────────────────────────
+  Purpose : Remove a member from a plan (owner only). Also removes their
+            pending incomplete task instances for this plan.
+  Auth    : Required (must be owner)
+  Params  : planId, memberId (both MongoDB ObjectIds)
+  Body    : none
+  Success : 200 → { message, plan }
+  Errors  : 400 → Cannot remove owner, 403 → Not owner, 404 → Plan/member not found
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 4. INVITES — /api/invite
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── POST /api/invite/send ───────────────────────────────────────────────────────
+  Purpose : Send an invite to another user to join a plan
+  Auth    : Required (must be a member of the plan yourself)
+  Body    : {
+              "reciverUserName": "john_doe",    (required — target user's username)
+              "planID": "<plan ObjectId>"       (required)
+            }
+  Rules   : Cannot invite yourself | Cannot invite existing member | No duplicate invites
+  Success : 201 → { message, invite, notification }
+            Socket: fires "invite_received" to receiver's room
+  Errors  : 400 → Self-invite / already member / duplicate, 403 → Not a plan member,
+            404 → User or plan not found
+
+── GET /api/invite/pending ─────────────────────────────────────────────────────
+  Purpose : Get all pending invites sent TO the logged-in user
+  Auth    : Required
+  Body    : none
+  Success : 200 → { message, length, invites: [ { sender: { username, email }, plan: { title } } ] }
+
+── POST /api/invite/accept/:inviteId ───────────────────────────────────────────
+  Purpose : Accept a pending invite and join the plan
+  Auth    : Required (must be the invite receiver)
+  Params  : inviteId → MongoDB ObjectId of the invite
+  Body    : { "planId": "<plan ObjectId>" }    (required)
+  Success : 200 → { message: "invite accepted" }
+            Socket: fires "member_joined" to the plan room
+  Errors  : 400 → Already a member / invite already used, 403 → Wrong user,
+            404 → Invite or plan not found
+
+── POST /api/invite/reject/:inviteId ───────────────────────────────────────────
+  Purpose : Reject a pending invite
+  Auth    : Required (must be the invite receiver)
+  Params  : inviteId → MongoDB ObjectId of the invite
+  Body    : none
+  Success : 200 → { message: "Invite rejected" }
+  Errors  : 400 → Already used, 403 → Wrong user, 404 → Invite not found
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 5. TASKS — /api/task
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── POST /api/task/postTask/:planId ─────────────────────────────────────────────
+  Purpose : Create a new task inside a plan. If startDate + endDate are provided,
+            TaskInstances are auto-created for each day in the range.
+  Auth    : Required (must be a member of the plan)
+  Params  : planId → MongoDB ObjectId of the plan
+  Body    : {
+              "title":       "Fix bug #42",           (required)
+              "description": "Details here...",
+              "assignedTo":  ["<userId>", "..."],     (optional, defaults to self)
+              "priority":    "high" | "medium" | "low",
+              "startDate":   "2026-04-01",
+              "endDate":     "2026-04-07",
+              "recurrence": {
+                "isRecurring": true,
+                "type":        "daily" | "weekly" | "monthly" | "custom",
+                "interval":    1,
+                "endDate":     "2026-12-31"
+              }
+            }
+  Success : 201 → { message, task }
+            Socket: fires "task_created" to the plan room
+  Errors  : 400 → Missing title / date mismatch / invalid assignees,
+            403 → Not a plan member, 404 → Plan not found
+
+── POST /api/task/taskComplete/:taskId ─────────────────────────────────────────
+  Purpose : Mark a task as completed for today. Awards +10 XP to user.
+            If recurring, auto-creates the next occurrence instance.
+            Updates both user streak and plan streak.
+  Auth    : Required
+  Params  : taskId → MongoDB ObjectId of the root Task
+  Body    : none
+  Success : 200 → { message: "Task completed", instance }
+          | 200 → { message: "Task already completed", instance }
+            Socket: fires "task_completed" to the plan room
+  Errors  : 404 → Task not found
+
+── GET /api/task/get/pendingTasks?page=1 ───────────────────────────────────────
+  Purpose : Get all pending (incomplete) task instances assigned to you.
+            Sorted by due date ascending. Paginated at 20 per page.
+  Auth    : Required
+  Query   : page (optional, default: 1)
+  Success : 200 → { message, page, totalPages, totalCount,
+                    tasks: [ { ...instance, task: { title, description, priority } } ] }
+
+── GET /api/task/get/completedTasks?page=1 ─────────────────────────────────────
+  Purpose : Get all completed task instances assigned to you.
+            Sorted by completion date descending. Paginated at 20 per page.
+  Auth    : Required
+  Query   : page (optional, default: 1)
+  Success : 200 → { message, page, totalPages, totalCount,
+                    tasks: [ { ...instance, task: { title, description, priority } } ] }
+
+── PUT /api/task/update/:taskId ────────────────────────────────────────────────
+  Purpose : Update a root task's details (only the task creator can do this).
+            Changes reflect across all future instances.
+  Auth    : Required (must be task creator)
+  Params  : taskId → MongoDB ObjectId of the root Task
+  Body    : {
+              "title":       "Updated title",          (optional)
+              "description": "Updated desc",           (optional)
+              "priority":    "high" | "medium" | "low",(optional)
+              "assignedTo":  ["<userId>", "..."]       (optional, must be plan members)
+            }
+  Success : 200 → { message, task }
+            Socket: fires "task_updated" to the plan room
+  Errors  : 400 → Invalid assignees, 403 → Not creator, 404 → Task not found
+
+── PATCH /api/task/reschedule/:instanceId ──────────────────────────────────────
+  Purpose : Move a specific task instance to a different date.
+            Used by the Drag & Drop calendar feature.
+  Auth    : Required (must be a plan member)
+  Params  : instanceId → MongoDB ObjectId of the TaskInstance
+  Body    : { "newDate": "2026-04-05" }    (required, ISO date string)
+  Success : 200 → { message, instance }
+            Socket: fires "task_rescheduled" to the plan room
+  Errors  : 400 → Missing date / duplicate date / invalid format,
+            403 → Not a plan member, 404 → Instance not found
+
+── DELETE /api/task/delete/:taskId ─────────────────────────────────────────────
+  Purpose : Delete a task and all its future incomplete instances.
+            Completed instances (history) are preserved.
+  Auth    : Required (must be task creator)
+  Params  : taskId → MongoDB ObjectId of the root Task
+  Body    : none
+  Success : 200 → { message: "task deleted" }
+  Errors  : 403 → Not creator, 404 → Task not found
+
+── POST /api/task/upload/image ─────────────────────────────────────────────────
+  Purpose : Upload proof images for a completed task instance (via ImageKit)
+  Auth    : Required (must be the assigned user of the instance)
+  Body    : multipart/form-data
+              taskInstanceId: "<instanceId>"
+              files: (up to 10 image files)
+  Success : 200 → { message, files: ["<url1>", "<url2>", ...] }
+  Errors  : 400 → Missing instanceId / no files / too many files (>10),
+            403 → Not your instance, 404 → Instance not found
+
+── GET /api/task/get/calendar?startDate=X&endDate=Y ────────────────────────────
+  Purpose : Get all task instances for a date range (for calendar view).
+            Use this to populate the monthly/weekly calendar grid on the frontend.
+  Auth    : Required
+  Query   : startDate (required) → "2026-04-01"
+            endDate   (required) → "2026-04-30"
+  Success : 200 → { message, tasks: [ { ...instance, task: {...}, plan: {...} } ] }
+  Errors  : 400 → Missing dates / invalid format
+
+── GET /api/task/search?q=keyword&priority=high&completed=false&page=1 ─────────
+  Purpose : Search and filter task instances. All query params are optional.
+            Supports text search across task title and description.
+  Auth    : Required
+  Query   : q         → search text (searches title + description)
+            priority  → "high" | "medium" | "low"
+            completed → "true" | "false"
+            plan      → <planId> (filter by specific plan)
+            page      → page number (default: 1, limit: 50 per page)
+  Success : 200 → { message, page, totalPages, totalCount,
+                    tasks: [ { ...instance, task: { title, priority }, plan: { title } } ] }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 6. DASHBOARD — /api/dashboard
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── GET /api/dashboard/stats ────────────────────────────────────────────────────
+  Purpose : Get aggregated stats for the main dashboard screen
+  Auth    : Required
+  Body    : none
+  Success : 200 → {
+              message,
+              stats: {
+                xp:                 1240,
+                streak:             7,
+                tasksCompletedToday: 3,
+                weeklyCompletion: [
+                  { date: "2026-03-26", count: 2 },
+                  { date: "2026-03-27", count: 5 },
+                  ...  (last 7 days always returned, 0 for days with no completions)
+                ],
+                activeTasksByPriority: {
+                  high:   4,
+                  medium: 6,
+                  low:    2
+                }
+              }
+            }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 7. NOTIFICATIONS — /api/notification
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── GET /api/notification/get ───────────────────────────────────────────────────
+  Purpose : Get notifications for the logged-in user. Paginated at 20 per page.
+  Auth    : Required
+  Query   : page     (optional, default: 1)
+            showRead → "true" to include already-read notifications (default: false,
+                       shows only unread)
+  Success : 200 → { message, page, totalPages, totalCount, notifications: [...] }
+  Note    : Notification types → "task_assigned" | "task_completed" |
+                                  "task_updated"  | "invite_received"
+
+── PATCH /api/notification/read/:notificationId ────────────────────────────────
+  Purpose : Mark a single notification as read
+  Auth    : Required (must be your notification)
+  Params  : notificationId → MongoDB ObjectId
+  Body    : none
+  Success : 200 → { message: "notification marked as read" }
+  Errors  : 404 → Not found or not yours
+
+── PATCH /api/notification/read-all ────────────────────────────────────────────
+  Purpose : Mark ALL your unread notifications as read at once
+            (used by the "Mark all as read" button in UI)
+  Auth    : Required
+  Body    : none
+  Success : 200 → { message: "All notifications marked as read", updatedCount: 5 }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 8. REAL-TIME — Socket.io
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Connection URL : ws://localhost:3000
+  Auth method    : Pass JWT in handshake auth payload (NOT as a query param)
+
+  Frontend connect example:
+    const socket = io("http://localhost:3000", {
+      auth: { token: "<your JWT>" }
+    });
+
+  CLIENT → SERVER events (emit these from the frontend):
+  ┌─────────────────┬────────────────────────────────────────────────────────┐
+  │ Event           │ Payload         │ Purpose                              │
+  ├─────────────────┼─────────────────┼──────────────────────────────────────┤
+  │ join_plan       │ "<planId>"      │ Subscribe to a plan's real-time room │
+  │ leave_plan      │ "<planId>"      │ Unsubscribe from a plan's room       │
+  └─────────────────┴─────────────────┴──────────────────────────────────────┘
+
+  SERVER → CLIENT events (listen for these on the frontend):
+  ┌──────────────────┬─────────────────────────────────────────────────────────┐
+  │ Event            │ Payload              │ When it fires                    │
+  ├──────────────────┼──────────────────────┼──────────────────────────────────┤
+  │ task_created     │ task object          │ Any member creates a task        │
+  │ task_updated     │ task object          │ Task title/priority/etc. changes │
+  │ task_completed   │ { instanceId,taskId} │ A task instance is completed     │
+  │ task_rescheduled │ instance object      │ Task dragged to new date         │
+  │ invite_received  │ invite object        │ You received a new invite        │
+  │ member_joined    │ { userId }           │ Someone accepted a plan invite   │
+  └──────────────────┴──────────────────────┴──────────────────────────────────┘
+
+  Note: User auto-joins their personal room "user_<userId>" on connect.
+        Call socket.emit("join_plan", planId) after opening a plan page.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ COMMON ERROR RESPONSES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  400 Bad Request   → Missing or invalid fields in request body/query
+  401 Unauthorized  → No token, invalid token, or wrong password
+  403 Forbidden     → Token valid but you don't have permission (wrong role/owner)
+  404 Not Found     → Document doesn't exist in the database
+  409 Conflict      → Resource already exists (duplicate user, invite, etc.)
+  500 Server Error  → Unexpected crash — check server logs
+
+================================================================================

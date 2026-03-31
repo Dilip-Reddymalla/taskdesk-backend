@@ -6,13 +6,15 @@ const { nanoid } = require("nanoid");
 
 async function createPlan(req, res) {
   try {
-    let { title, description, owner, members } = req.body;
-    if (!owner) {
-      owner = req.user.id;
+    let { title, description, members } = req.body;
+    const owner = req.user.id;
+
+    if (!members || members.length === 0) {
+      members = [owner];
+    } else if (!members.includes(owner)) {
+      members = [owner, ...members];
     }
-    if (!members) {
-      members = [req.user.id];
-    }
+
     if (req.user.status === "banned") {
       return res.status(403).json({
         message: "You are banned from creating",
@@ -60,8 +62,8 @@ async function deletePlan(req, res) {
   try {
     const { slug } = req.params;
     if (!slug) {
-      return res.status(401).json({
-        message: "Enter the sulg id of the plan",
+      return res.status(400).json({
+        message: "Enter the slug id of the plan",
       });
     }
     const plan = await planModel.findOne({ slug });
@@ -78,7 +80,7 @@ async function deletePlan(req, res) {
 
     await plan.deleteOne();
 
-    return res.status(201).json({
+    return res.status(200).json({
       message: "Plan deleted",
     });
   } catch (error) {
@@ -163,10 +165,12 @@ async function getUserPlans(req, res) {
         message: "Invalid user",
       });
     }
-    const plans = await planModel.find({ owner: userId });
+    const plans = await planModel.find({ members: userId }).populate("owner", "username avatar");
     if (!plans || plans.length === 0) {
-      return res.status(404).json({
-        message: "No plans found in userID",
+      return res.status(200).json({
+        message: "Fetched plans in the userID",
+        length: 0,
+        plans: [],
       });
     }
     res.status(200).json({
@@ -179,10 +183,77 @@ async function getUserPlans(req, res) {
   }
 }
 
+async function getPlanById(req, res) {
+  try {
+    const { planId } = req.params;
+    const userId = req.user.id;
+    
+    const plan = await planModel.findById(planId).populate("members", "username email avatar xp streakCount role");
+    
+    if (!plan) {
+      return res.status(404).json({ message: "Plan not found" });
+    }
+    
+    const isMember = plan.members.some(member => member._id.toString() === userId.toString());
+    if (!isMember) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    
+    res.status(200).json({
+      message: "Plan details fetched successfully",
+      plan
+    });
+  } catch (error) {
+    console.log("[getPlanById Error]:", error);
+    res.status(500).json({ message: "Server Error" });
+  }
+}
+
+async function removePlanMember(req, res) {
+  try {
+    const { planId, memberId } = req.params;
+    const userId = req.user.id;
+    
+    const plan = await planModel.findById(planId);
+    if (!plan) {
+      return res.status(404).json({ message: "Plan not found" });
+    }
+    
+    if (plan.owner.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "Only plan owner can remove members" });
+    }
+    
+    if (plan.owner.toString() === memberId.toString()) {
+      return res.status(400).json({ message: "Cannot remove the plan owner" });
+    }
+    
+    const isMember = plan.members.some(id => id.toString() === memberId.toString());
+    if (!isMember) {
+      return res.status(404).json({ message: "User is not a member of this plan" });
+    }
+    
+    plan.members = plan.members.filter(id => id.toString() !== memberId.toString());
+    await plan.save();
+    
+    await TaskInstance.deleteMany({ plan: planId, assignedTo: memberId, isCompleted: false });
+    
+    res.status(200).json({
+      message: "Member removed from plan successfully",
+      plan
+    });
+  } catch (error) {
+    console.log("[removePlanMember Error]:", error);
+    res.status(500).json({ message: "Server Error" });
+  }
+}
+
 module.exports = {
   createPlan,
   deletePlan,
   updatePlanStreak,
   updateUserStreak,
   getUserPlans,
+  getPlanById,
+  removePlanMember,
 };
+

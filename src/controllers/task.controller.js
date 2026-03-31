@@ -3,6 +3,8 @@ const TaskInstance = require("../models/taskInstance.model");
 const User = require("../models/user.model");
 const planContoller = require("../controllers/plan.controller");
 const Plan = require("../models/plan.model");
+const { getIO } = require("../socket");
+const uploadFile = require("../services/imagekit.service");
 
 async function createTask(req, res) {
   try {
@@ -91,6 +93,12 @@ async function createTask(req, res) {
       }
     }
 
+    try {
+      getIO().to(`plan_${planId}`).emit("task_created", task);
+    } catch (err) {
+      console.log("Socket emit failed", err.message);
+    }
+
     res.status(201).json({
       message: "Task created successfully",
       task,
@@ -132,16 +140,68 @@ async function completeTask(req, res) {
       });
     }
 
-    if (!instance.isCompleted) {
-      instance.isCompleted = true;
-      instance.completedAt = new Date();
-      await instance.save();
+    if (instance.isCompleted) {
+      return res.status(200).json({
+        message: "Task already completed",
+        instance,
+      });
+    }
 
-      await User.findByIdAndUpdate(userId, { $inc: { xp: 10 } });
+    instance.isCompleted = true;
+    instance.completedAt = new Date();
+    await instance.save();
+
+    await User.findByIdAndUpdate(userId, { $inc: { xp: 10 } });
+
+    const taskObj = await Task.findById(taskId);
+    if (taskObj && taskObj.recurrence && taskObj.recurrence.isRecurring) {
+      let nextDate = new Date(instance.date);
+
+      switch (taskObj.recurrence.type) {
+        case "daily":
+          nextDate.setDate(nextDate.getDate() + (taskObj.recurrence.interval || 1));
+          break;
+        case "weekly":
+          nextDate.setDate(nextDate.getDate() + 7 * (taskObj.recurrence.interval || 1));
+          break;
+        case "monthly":
+          nextDate.setMonth(nextDate.getMonth() + (taskObj.recurrence.interval || 1));
+          break;
+        case "custom":
+          nextDate.setDate(nextDate.getDate() + (taskObj.recurrence.interval || 1));
+          break;
+      }
+
+      if (!taskObj.recurrence.endDate || nextDate <= new Date(taskObj.recurrence.endDate)) {
+        nextDate.setHours(0, 0, 0, 0);
+        const endOfNextDay = new Date(nextDate);
+        endOfNextDay.setHours(23, 59, 59, 999);
+
+        const existingNext = await TaskInstance.findOne({
+          task: taskId,
+          assignedTo: userId,
+          date: { $gte: nextDate, $lte: endOfNextDay },
+        });
+
+        if (!existingNext) {
+          await TaskInstance.create({
+            task: taskId,
+            plan: taskObj.plan,
+            assignedTo: userId,
+            date: new Date(nextDate),
+          });
+        }
+      }
     }
 
     await planContoller.updatePlanStreak(instance.plan);
     await planContoller.updateUserStreak(userId);
+
+    try {
+      getIO().to(`plan_${instance.plan}`).emit("task_completed", { instanceId: instance._id, taskId: taskId });
+    } catch (err) {
+      console.log("Socket emit failed", err.message);
+    }
 
     res.status(200).json({
       message: "Task completed",
@@ -153,57 +213,68 @@ async function completeTask(req, res) {
   }
 }
 
+
 async function getPendingTasks(req, res) {
   try {
     const userId = req.user.id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = 20;
+    const skip = (page - 1) * limit;
+
     if (!userId) {
-      return res.status(401).json({
-        message: "Invalid user",
-      });
+      return res.status(401).json({ message: "Invalid user" });
     }
-    const tasks = await TaskInstance.find({
-      assignedTo: userId,
-      isCompleted: false,
-    });
-    if (!tasks || tasks.length === 0) {
-      return res.status(404).json({ message: "No tasks found for userID" });
-    }
+
+    const [tasks, total] = await Promise.all([
+      TaskInstance.find({ assignedTo: userId, isCompleted: false })
+        .populate("task", "title description priority recurrence")
+        .sort({ date: 1 })
+        .skip(skip)
+        .limit(limit),
+      TaskInstance.countDocuments({ assignedTo: userId, isCompleted: false }),
+    ]);
+
     res.status(200).json({
       message: "Tasks fetched",
-      length: tasks.length,
+      page,
+      totalPages: Math.ceil(total / limit),
+      totalCount: total,
       tasks,
     });
   } catch (error) {
-    res.status(500).json({
-      message: error,
-    });
+    res.status(500).json({ message: "Server error" });
   }
 }
 
 async function getCompletedTasks(req, res) {
   try {
     const userId = req.user.id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = 20;
+    const skip = (page - 1) * limit;
+
     if (!userId) {
-      return res.status(401).json({
-        message: "Invalid user",
-      });
+      return res.status(401).json({ message: "Invalid user" });
     }
-    const tasks = await TaskInstance.find({
-      assignedTo: userId,
-      isCompleted: true,
-    });
-    if (!tasks || tasks.length === 0) {
-      return res.status(404).json({ message: "No tasks found for userID" });
-    }
+
+    const [tasks, total] = await Promise.all([
+      TaskInstance.find({ assignedTo: userId, isCompleted: true })
+        .populate("task", "title description priority recurrence")
+        .sort({ completedAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      TaskInstance.countDocuments({ assignedTo: userId, isCompleted: true }),
+    ]);
+
     res.status(200).json({
       message: "Tasks fetched",
-      length: tasks.length,
+      page,
+      totalPages: Math.ceil(total / limit),
+      totalCount: total,
       tasks,
     });
   } catch (error) {
-    res.status(500).json({
-      message: error,
-    });
+    res.status(500).json({ message: "Server error" });
   }
 }
 async function deleteTask(req, res) {
@@ -256,7 +327,7 @@ async function addUploadedFile(req, res) {
     if (!taskIns) {
       return res.status(404).json({ message: "no tasks found" });
     }
-    if (taskIns.user.toString() !== userId.toString()) {
+    if (taskIns.assignedTo.toString() !== userId.toString()) {
       return res.status(403).json({ message: "not authorized" });
     }
     const uploadPromises = req.files.map((file) => uploadFile(file));
@@ -273,6 +344,189 @@ async function addUploadedFile(req, res) {
     return res.status(500).json({ message: "server error" });
   }
 }
+async function updateTask(req, res) {
+  try {
+    const { taskId } = req.params;
+    const userId = req.user.id;
+    const { title, description, priority, assignedTo } = req.body;
+
+    const task = await Task.findById(taskId);
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    if (task.createdBy.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "Not authorized to update this task" });
+    }
+
+    if (title) task.title = title;
+    if (description !== undefined) task.description = description;
+    if (priority) task.priority = priority;
+    
+    if (assignedTo && Array.isArray(assignedTo)) {
+      const plan = await Plan.findById(task.plan);
+      const invalidUsers = assignedTo.filter(id => !plan.members.includes(id));
+      if (invalidUsers.length > 0) {
+        return res.status(400).json({ message: "Assigned users must be part of the plan" });
+      }
+      task.assignedTo = assignedTo;
+    }
+
+    await task.save();
+
+    try {
+      getIO().to(`plan_${task.plan}`).emit("task_updated", task);
+    } catch (err) {
+      console.log("Socket emit failed", err.message);
+    }
+
+    res.status(200).json({
+      message: "Task updated successfully",
+      task
+    });
+  } catch (error) {
+    console.log("[updateTask error]:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+async function rescheduleTaskInstance(req, res) {
+  try {
+    const { instanceId } = req.params;
+    const userId = req.user.id;
+    const { newDate } = req.body;
+
+    if (!newDate) {
+      return res.status(400).json({ message: "newDate is required" });
+    }
+
+    const instance = await TaskInstance.findById(instanceId);
+    if (!instance) {
+      return res.status(404).json({ message: "Task instance not found" });
+    }
+
+    const plan = await Plan.findById(instance.plan);
+    if (!plan.members.includes(userId)) {
+      return res.status(403).json({ message: "Not authorized to reschedule tasks in this plan" });
+    }
+
+    const parsedDate = new Date(newDate);
+    if (isNaN(parsedDate.getTime())) {
+      return res.status(400).json({ message: "Invalid date format" });
+    }
+
+    parsedDate.setHours(0, 0, 0, 0);
+
+    instance.date = parsedDate;
+    await instance.save();
+
+    try {
+      getIO().to(`plan_${instance.plan}`).emit("task_rescheduled", instance);
+    } catch (err) {
+      console.log("Socket emit failed", err.message);
+    }
+
+    res.status(200).json({
+      message: "Task rescheduled successfully",
+      instance
+    });
+  } catch(error) {
+    console.log("[rescheduleTaskInstance error]:", error);
+    if (error.code === 11000) {
+      return res.status(400).json({ message: "Task instance already exists for this user on this date" });
+    }
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+async function getCalendarTasks(req, res) {
+  try {
+    const userId = req.user.id;
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: "startDate and endDate are required" });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ message: "Invalid date format" });
+    }
+
+    const tasks = await TaskInstance.find({
+      assignedTo: userId,
+      date: { $gte: start, $lte: end }
+    }).populate("task plan");
+
+    res.status(200).json({
+      message: "Calendar tasks fetched",
+      tasks
+    });
+  } catch (error) {
+    console.log("[getCalendarTasks error]:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+async function searchTasks(req, res) {
+  try {
+    const userId = req.user.id;
+    const { q, priority, completed, plan } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const limit = 50;
+    const skip = (page - 1) * limit;
+
+    let filter = { assignedTo: userId };
+
+    if (completed !== undefined) {
+      filter.isCompleted = completed === "true";
+    }
+
+    if (plan) {
+      filter.plan = plan;
+    }
+
+    let taskFilter = {};
+    if (q) {
+      taskFilter.$or = [
+        { title: { $regex: q, $options: "i" } },
+        { description: { $regex: q, $options: "i" } }
+      ];
+    }
+    if (priority) {
+      taskFilter.priority = priority;
+    }
+
+    if (Object.keys(taskFilter).length > 0) {
+      const matchedTasks = await Task.find(taskFilter).select("_id");
+      const taskIds = matchedTasks.map(t => t._id);
+      filter.task = { $in: taskIds };
+    }
+
+    const [instances, total] = await Promise.all([
+      TaskInstance.find(filter)
+        .populate("task", "title description priority recurrence")
+        .populate("plan", "title")
+        .skip(skip)
+        .limit(limit),
+      TaskInstance.countDocuments(filter),
+    ]);
+
+    res.status(200).json({
+      message: "Search completed",
+      page,
+      totalPages: Math.ceil(total / limit),
+      totalCount: total,
+      tasks: instances
+    });
+  } catch (error) {
+    console.log("[searchTasks error]:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
 module.exports = {
   createTask,
   completeTask,
@@ -280,4 +534,8 @@ module.exports = {
   getCompletedTasks,
   deleteTask,
   addUploadedFile,
+  updateTask,
+  rescheduleTaskInstance,
+  getCalendarTasks,
+  searchTasks,
 };
