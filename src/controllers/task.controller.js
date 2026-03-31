@@ -236,11 +236,48 @@ async function deleteTask(req, res) {
     res.status(500).json({ message: "Server error" });
   }
 }
+async function addUploadedFile(req, res) {
+  try {
+    const { taskInstanceId } = req.body;
+    const userId = req.user.id;
+    if (!taskInstanceId) {
+      return res.status(400).json({ message: "Task instance id is required" });
+    }
+    if (!userId) {
+      return res.status(400).json({ message: "User Id is required" });
+    }
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: "files are required" });
+    }
+    if (req.files.length > 10) {
+      return res.status(400).json({ message: "Too many files" });
+    }
+    const taskIns = await TaskInstance.findById(taskInstanceId);
+    if (!taskIns) {
+      return res.status(404).json({ message: "no tasks found" });
+    }
+    if (taskIns.user.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "not authorized" });
+    }
+    const uploadPromises = req.files.map((file) => uploadFile(file));
+    const imageUrls = await Promise.all(uploadPromises);
+    taskIns.images.push(...imageUrls);
+    await taskIns.save();
 
+    return res.status(200).json({
+      message: "files uploaded",
+      files: imageUrls,
+    });
+  } catch (error) {
+    console.log("[task controller:]", error);
+    return res.status(500).json({ message: "server error" });
+  }
+}
 module.exports = {
   createTask,
   completeTask,
   getPendingTasks,
   getCompletedTasks,
   deleteTask,
+  addUploadedFile,
 };
