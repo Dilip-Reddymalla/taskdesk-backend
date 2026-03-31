@@ -22,5 +22,31 @@ async function getNotification(req, res) {
     return res.status(500).json({ message: "server Error" });
   }
 }
+async function markAsRead(req, res) {
+  try {
+    const notificationId = req.params.notificationId;
+    const userId = req.user.id;
+    if (!notificationId) {
+      return res.status(400).json({ message: "notification id is required" });
+    }
+    const notification = await notificationModel.findOneAndUpdate(
+      { _id: notificationId, user: userId },
+      { isRead: true },
+      { new: true },
+    );
 
-module.exports = { getNotification };
+    if (!notification) {
+      return res.status(404).json({
+        message: "notification not found or not yours",
+      });
+    }
+    return res.status(200).json({
+      message: "notification marked as read",
+    });
+  } catch (error) {
+    console.log("[notification controller]:", error);
+    return res.status(500).json({ message: "server error" });
+  }
+}
+
+module.exports = { getNotification, markAsRead };
