@@ -97,4 +97,54 @@ async function getPendingInvites(req, res) {
     res.status(500).json({ message: "server error" });
   }
 }
-module.exports = { sendInvite, getPendingInvites };
+async function acceptInvite(req, res) {
+  try {
+    const userId = req.user.id;
+    const inviteId = req.params.inviteId;
+    const { planId } = req.body;
+    if (!inviteId) {
+      return res.status(400).json({ message: "invite id required" });
+    }
+    if (!planId) {
+      return res.status(409).json({ message: "plan id required" });
+    }
+    if (!userId) {
+      return res.status(409).json({ message: "User id required" });
+    }
+    const invite = await inviteModel.findById(inviteId);
+    if (!invite)
+      return res.status(404).json({ message: "invite not found on invite id" });
+    if (invite.status !== "pending") {
+      return res.status(400).json({ message: "invite already used" });
+    }
+    if (userId.toString() !== invite.receiver.toString()) {
+      return res
+        .status(409)
+        .json({ message: "the invite does not belong to you" });
+    }
+    const plan = await planModel.findById(planId);
+    if (!plan) return res.status(404).json({ message: "plan not found" });
+    if (plan.owner.toString() !== invite.sender.toString())
+      return res.status(403).json({
+        message: "The invite should be send from the owner of the plan",
+      });
+    const alreadyMember = plan.members.some(
+      (id) => id.toString() === userId.toString(),
+    );
+
+    if (alreadyMember) {
+      return res.status(400).json({
+        message: "already a member",
+      });
+    }
+    plan.members.push(userId);
+    await plan.save();
+    invite.status = "accepted";
+    await invite.save();
+    res.status(200).json({ message: "invite accepted" });
+  } catch (error) {
+    console.log("[invite controller]:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+}
+module.exports = { sendInvite, getPendingInvites, acceptInvite };
