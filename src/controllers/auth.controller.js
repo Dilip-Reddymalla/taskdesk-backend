@@ -19,13 +19,21 @@ async function registerUser(req, res) {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const code = generateVerificationCode();
+    const expires = new Date(Date.now() + 10 * 60 * 1000);
 
     const user = await userModel.create({
       username,
       email,
       password: hashedPassword,
       role: "user",
+      authSource: "local",
+      isEmailVerified: false,
+      emailVerificationCode: code,
+      emailVerificationExpires: expires,
     });
+
+    await sendVerificationEmail(email, username, code);
 
     const token = jwt.sign(
       {
@@ -41,7 +49,8 @@ async function registerUser(req, res) {
     );
 
     res.status(201).json({
-      message: "User Created succesfully",
+      message:
+        "Account created. Please check your email for the verification code.",
       user: {
         username: user.username,
         email: user.email,
@@ -73,6 +82,9 @@ async function loginUser(req, res) {
       return res.status(401).json({
         message: "Invaid Credentials",
       });
+    }
+    if(!uses.isEmailVerified){
+      return res.status(403).json({message:"Verify your email first"});
     }
     const token = jwt.sign(
       {
@@ -259,11 +271,76 @@ async function googleLogin(req, res) {
     });
   }
 }
+async function verifyEmail(req, res) {
+  try {
+    const { userId, code } = req.body;
 
+    const user = await userModel.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(400).json({ message: "Email already verified." });
+    }
+
+    if (user.emailVerificationCode !== code) {
+      return res.status(400).json({ message: "Invalid verification code." });
+    }
+
+    if (user.emailVerificationExpires < new Date()) {
+      return res.status(400).json({ message: "Verification code expired." });
+    }
+
+    // clear the code and mark as verified
+    user.isEmailVerified = true;
+    user.emailVerificationCode = undefined;
+    user.emailVerificationExpires = undefined;
+    await user.save();
+
+    res
+      .status(200)
+      .json({ message: "Email verified successfully. You can now log in." });
+  } catch (error) {
+    console.error("[Auth Controller - Verify Email Error]:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+async function resendVerificationCode(req, res) {
+  try {
+    const { userId } = req.body;
+
+    const user = await userModel.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(400).json({ message: "Email already verified." });
+    }
+
+    const code = generateVerificationCode();
+    const expires = new Date(Date.now() + 10 * 60 * 1000);
+
+    user.emailVerificationCode = code;
+    user.emailVerificationExpires = expires;
+    await user.save();
+
+    await sendVerificationEmail(user.email, user.username, code);
+
+    res.status(200).json({ message: "New verification code sent." });
+  } catch (error) {
+    console.error("[Auth Controller - Resend Code Error]:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
 module.exports = {
   registerUser,
   loginUser,
   deleteUser,
   verifyToken,
   googleLogin,
+  verifyEmail,
+  resendVerificationCode,
 };

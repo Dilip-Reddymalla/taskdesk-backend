@@ -12,4 +12,8 @@ router.get("/me", protect, authController.verifyToken);
 //Oauth routes
 router.post('/google',authController.googleLogin);
 
+//email verfication
+router.post("/verify-email",protect, authController.verifyEmail);
+router.post("/resend-verification",protect,authController.resendVerificationCode);
+
 module.exports = router;
