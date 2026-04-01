@@ -3,6 +3,8 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Plan = require("../models/plan.model.js");
 const Task = require("../models/task.model.js");
+const { OAuth2Client } = require("google-auth-library");
+const { axios } = require("axios");
 
 async function registerUser(req, res) {
   try {
@@ -160,4 +162,108 @@ async function verifyToken(req, res) {
   }
 }
 
-module.exports = { registerUser, loginUser, deleteUser, verifyToken };
+async function googleLogin(req, res) {
+  try {
+    const { code } = req.query;
+    const googleRes = await OAuth2Client.getToken(code);
+    OAuth2Client.setCredentials(googleRes.tokens);
+
+    const userRes = await axios.get(
+      `https://www.googleapis.com/oauth2/v1/userinfo?alt=json&access_token=${googleRes.tokens.access_token}`,
+    );
+    const { email, name, picture } = userRes.data;
+    let user = await userModel.findOne({ email: email });
+    if (!user) {
+      user = await userModel.create({
+        username: name,
+        email,
+        avatar: picture,
+        authSource: "google",
+        isEmailVerified: true,
+        authProviders: [
+          {
+            provider: "google",
+            providerId: googleId,
+            accessToken: googleRes.tokens.access_token,
+            refreshToken: googleRes.tokens.refresh_token,
+            tokenExpiresAt: new Date(googleRes.tokens.expiry_date),
+          },
+        ],
+      });
+    } else {
+      // existing user — check if google provider is already linked
+      const alreadyLinked = user.authProviders.some(
+        (p) => p.provider === "google" && p.providerId === googleId,
+      );
+
+      if (!alreadyLinked) {
+        // user signed up with local before, now linking google
+        user.authProviders.push({
+          provider: "google",
+          providerId: googleId,
+          accessToken: googleRes.tokens.access_token,
+          refreshToken: googleRes.tokens.refresh_token,
+          tokenExpiresAt: new Date(googleRes.tokens.expiry_date),
+        });
+        user.isEmailVerified = true;
+        await user.save();
+      } else {
+        // just update the tokens
+        const providerIndex = user.authProviders.findIndex(
+          (p) => p.provider === "google",
+        );
+        user.authProviders[providerIndex].accessToken =
+          googleRes.tokens.access_token;
+        user.authProviders[providerIndex].refreshToken =
+          googleRes.tokens.refresh_token;
+        user.authProviders[providerIndex].tokenExpiresAt = new Date(
+          googleRes.tokens.expiry_date,
+        );
+        await user.save();
+      }
+    }
+    if (user.status === "banned") {
+      return res.status(403).json({ message: "Your account has been banned." });
+    }
+    const token = jwt.sign(
+      {
+        id: user._id,
+        username: user.username,
+        role: user.role,
+        status: user.status,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_TIMEOUT },
+    );
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      maxAge: 1 * 12 * 60 * 60 * 1000, // 12hrs
+    });
+    res.status(200).json({
+      message: "User logged in Succesfully",
+      token: token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+      },
+    });
+  } catch (error) {
+    console.error("[Auth Controller - Login User Error]:", error);
+    res.status(500).json({
+      message: "Server error",
+    });
+  }
+}
+
+module.exports = {
+  registerUser,
+  loginUser,
+  deleteUser,
+  verifyToken,
+  googleLogin,
+};

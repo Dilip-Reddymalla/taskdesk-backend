@@ -9,4 +9,7 @@ router.post("/login", authController.loginUser);
 router.delete("/deleteUser",protect, authController.deleteUser);
 router.get("/me", protect, authController.verifyToken);
 
+//Oauth routes
+router.post('/google',authController.googleLogin);
+
 module.exports = router;
