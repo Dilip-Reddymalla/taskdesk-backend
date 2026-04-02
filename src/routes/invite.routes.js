@@ -7,6 +7,7 @@ const router = express.Router();
 
 router.post("/send",protect,inviteContoller.sendInvite);
 router.get("/pending",protect,inviteContoller.getPendingInvites);
+router.get("/get/all",protect,inviteContoller.getAllInvites);
 router.post("/accept/:inviteId",protect,inviteContoller.acceptInvite);
 router.post("/reject/:inviteId",protect,inviteContoller.rejectInvite);
 

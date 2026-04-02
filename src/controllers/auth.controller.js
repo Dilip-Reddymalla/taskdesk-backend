@@ -3,8 +3,8 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Plan = require("../models/plan.model.js");
 const Task = require("../models/task.model.js");
-const { OAuth2Client } = require("google-auth-library");
-const { axios } = require("axios");
+const { oauth2client } = require("../config/google.config.js");
+const axios = require("axios");
 const { generateVerificationCode } = require("../utils/generateCode.js");
 const { sendVerificationEmail } = require("../utils/sendEmail.js");
 async function registerUser(req, res) {
@@ -178,13 +178,15 @@ async function verifyToken(req, res) {
 async function googleLogin(req, res) {
   try {
     const { code } = req.query;
-    const googleRes = await OAuth2Client.getToken(code);
-    OAuth2Client.setCredentials(googleRes.tokens);
+    
+    // Use configured instance
+    const googleRes = await oauth2client.getToken(code);
+    oauth2client.setCredentials(googleRes.tokens);
 
     const userRes = await axios.get(
       `https://www.googleapis.com/oauth2/v1/userinfo?alt=json&access_token=${googleRes.tokens.access_token}`,
     );
-    const { email, name, picture } = userRes.data;
+    const { id: googleId, email, name, picture } = userRes.data;
     let user = await userModel.findOne({ email: email });
     if (!user) {
       user = await userModel.create({

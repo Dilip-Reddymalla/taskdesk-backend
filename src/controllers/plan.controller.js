@@ -165,7 +165,7 @@ async function getUserPlans(req, res) {
         message: "Invalid user",
       });
     }
-    const plans = await planModel.find({ members: userId }).populate("owner", "username avatar");
+    const plans = await planModel.find({ members: userId }).populate("owner", "username avatar").populate("members", "username avatar");
     if (!plans || plans.length === 0) {
       return res.status(200).json({
         message: "Fetched plans in the userID",

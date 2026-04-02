@@ -85,12 +85,14 @@ async function createTask(req, res) {
       const rInterval = isRec ? (recurrence.interval || 1) : 1;
 
       while (current <= end) {
-        await TaskInstance.create({
-          task: task._id,
-          plan: task.plan,
-          assignedTo: userId,
-          date: new Date(current),
-        });
+        for (const memberId of assignedTo) {
+          await TaskInstance.create({
+            task: task._id,
+            plan: task.plan,
+            assignedTo: memberId,
+            date: new Date(current),
+          });
+        }
 
         if (rType === "daily") {
           current.setDate(current.getDate() + rInterval);
@@ -103,13 +105,15 @@ async function createTask(req, res) {
         }
       }
     } else {
-      // Create a single instance immediately for 'Today' if no date range is provided
-      await TaskInstance.create({
-        task: task._id,
-        plan: task.plan,
-        assignedTo: userId,
-        date: new Date(),
-      });
+      // No date range — create a single instance for today for each assigned member
+      for (const memberId of assignedTo) {
+        await TaskInstance.create({
+          task: task._id,
+          plan: task.plan,
+          assignedTo: memberId,
+          date: new Date(),
+        });
+      }
     }
 
     try {
@@ -138,6 +142,19 @@ async function completeTask(req, res) {
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
 
+    const taskObj = await Task.findById(taskId);
+    if (!taskObj) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    // Always validate the user is actually assigned to this task
+    const isAssigned = taskObj.assignedTo && taskObj.assignedTo.some(
+      (id) => id.toString() === userId.toString()
+    );
+    if (!isAssigned) {
+      return res.status(403).json({ message: "You are not assigned to this task" });
+    }
+
     let instance = await TaskInstance.findOne({
       task: taskId,
       assignedTo: userId,
@@ -145,15 +162,9 @@ async function completeTask(req, res) {
     });
 
     if (!instance) {
-      const task = await Task.findById(taskId);
-
-      if (!task) {
-        return res.status(404).json({ message: "Task not found" });
-      }
-
       instance = await TaskInstance.create({
         task: taskId,
-        plan: task.plan,
+        plan: taskObj.plan,
         assignedTo: userId,
         date: startOfDay,
       });
@@ -171,8 +182,9 @@ async function completeTask(req, res) {
     await instance.save();
 
     await User.findByIdAndUpdate(userId, { $inc: { xp: 10 } });
+    // Plan earns collective XP whenever any member completes a task
+    await Plan.findByIdAndUpdate(instance.plan, { $inc: { xp: 5 } });
 
-    const taskObj = await Task.findById(taskId);
     if (taskObj && taskObj.recurrence && taskObj.recurrence.isRecurring) {
       let nextDate = new Date(instance.date);
 
@@ -694,6 +706,128 @@ async function editTaskInstance(req, res) {
   }
 }
 
+async function getTaskTemplates(req, res) {
+  try {
+    const { planId } = req.params;
+    const userId = req.user.id;
+    
+    // Check if the user is a member of the plan
+    const plan = await Plan.findById(planId);
+    if (!plan) {
+      return res.status(404).json({ message: "Plan not found" });
+    }
+    
+    if (!plan.members.includes(userId)) {
+      return res.status(403).json({ message: "Not authorized to access tasks in this plan" });
+    }
+
+    const templates = await Task.find({ plan: planId })
+      .populate("createdBy", "username")
+      .populate("assignedTo", "username")
+      .sort({ createdAt: -1 });
+      
+    res.status(200).json({
+      message: "Task templates fetched",
+      templates
+    });
+  } catch(error) {
+    console.log("[getTaskTemplates error]:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+
+async function scheduleTaskInstances(req, res) {
+  try {
+    const { taskId } = req.params;
+    const userId = req.user.id;
+    const { startDate, endDate, assignedTo } = req.body;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: "startDate and endDate are required" });
+    }
+
+    const task = await Task.findById(taskId);
+    if (!task) return res.status(404).json({ message: "Task template not found" });
+
+    const plan = await Plan.findById(task.plan);
+    if (!plan) return res.status(404).json({ message: "Plan not found" });
+
+    if (!plan.members.some(id => id.toString() === userId.toString())) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    const targets = (assignedTo && assignedTo.length > 0)
+      ? assignedTo
+      : task.assignedTo.map(id => id.toString());
+
+    if (!targets || targets.length === 0) {
+      return res.status(400).json({ message: "No members to schedule for" });
+    }
+
+    const memberIds = plan.members.map(id => id.toString());
+    const invalid = targets.filter(id => !memberIds.includes(id.toString()));
+    if (invalid.length > 0) {
+      return res.status(400).json({ message: "Some selected members are not in this plan" });
+    }
+
+    let current = new Date(startDate);
+    const end = new Date(endDate);
+    const interval = task.recurrence?.isRecurring ? (task.recurrence.interval || 1) : 1;
+    const rType = task.recurrence?.type || "daily";
+    const created = [];
+
+    while (current <= end) {
+      const dayStart = new Date(current); dayStart.setHours(0, 0, 0, 0);
+      const dayEnd   = new Date(current); dayEnd.setHours(23, 59, 59, 999);
+
+      for (const memberId of targets) {
+        const exists = await TaskInstance.findOne({
+          task: taskId,
+          assignedTo: memberId,
+          date: { $gte: dayStart, $lte: dayEnd },
+        });
+        if (!exists) {
+          const inst = await TaskInstance.create({
+            task: taskId,
+            plan: task.plan,
+            assignedTo: memberId,
+            date: new Date(current),
+          });
+          created.push(inst);
+        }
+      }
+
+      if (rType === "weekly") current.setDate(current.getDate() + 7 * interval);
+      else if (rType === "monthly") current.setMonth(current.getMonth() + interval);
+      else current.setDate(current.getDate() + interval);
+    }
+
+    try {
+      getIO().to(`plan_${task.plan}`).emit("task_created", { taskId, count: created.length });
+    } catch (e) {}
+
+    return res.status(201).json({ message: `${created.length} instance(s) scheduled`, count: created.length });
+  } catch (error) {
+    console.log("[scheduleTaskInstances error]:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+async function getPlanLog(req, res) {
+  try {
+    const { planId } = req.params;
+    const userId = req.user.id;
+    const instances = await TaskInstance.find({ plan: planId, assignedTo: userId })
+      .populate("task", "title createdAt recurrence priority")
+      .sort({ date: 1 });
+    res.status(200).json({ message: "Plan log fetched successfully", instances });
+  } catch (error) {
+    console.log("[getPlanLog error]:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
 module.exports = {
   createTask,
   completeTask,
@@ -708,4 +842,8 @@ module.exports = {
   editTaskInstance,
   getCalendarTasks,
   searchTasks,
+  getTaskTemplates,
+  scheduleTaskInstances,
+  getPlanLog,
 };
+

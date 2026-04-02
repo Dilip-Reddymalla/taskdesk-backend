@@ -34,6 +34,10 @@ const planSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    xp: {
+      type: Number,
+      default: 0,
+    },
     lastCompletedDate: {
       type: Date,
       default: null,

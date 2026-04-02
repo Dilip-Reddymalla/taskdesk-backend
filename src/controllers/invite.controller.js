@@ -105,6 +105,26 @@ async function getPendingInvites(req, res) {
     res.status(500).json({ message: "server error" });
   }
 }
+
+async function getAllInvites(req, res) {
+  try {
+    const userID = req.user.id;
+    const invites = await inviteModel
+      .find({ receiver: userID })
+      .populate("sender", "username email")
+      .populate("plan", "title")
+      .sort({ createdAt: -1 });
+    
+    res.status(200).json({
+      message: "all invites fetched",
+      length: invites.length,
+      invites,
+    });
+  } catch (error) {
+    console.log("[invite controller]:", error);
+    res.status(500).json({ message: "server error" });
+  }
+}
 async function acceptInvite(req, res) {
   try {
     const userId = req.user.id;
@@ -133,10 +153,7 @@ async function acceptInvite(req, res) {
     
     const plan = await planModel.findById(planId);
     if (!plan) return res.status(404).json({ message: "plan not found" });
-    if (plan.owner.toString() !== invite.sender.toString())
-      return res.status(403).json({
-        message: "The invite should be send from the owner of the plan",
-      });
+
     const alreadyMember = plan.members.some(
       (id) => id.toString() === userId.toString(),
     );
@@ -193,4 +210,4 @@ async function rejectInvite(req, res) {
     return res.status(500).json({ message: "server error" });
   }
 }
-module.exports = { sendInvite, getPendingInvites, acceptInvite, rejectInvite };
+module.exports = { sendInvite, getPendingInvites, getAllInvites, acceptInvite, rejectInvite };
