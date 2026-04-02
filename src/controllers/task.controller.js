@@ -137,10 +137,17 @@ async function completeTask(req, res) {
     const { taskId } = req.params;
     const userId = req.user.id;
 
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+    const nowOutput = new Date();
+    const istVirtualTime = new Date(nowOutput.getTime() + IST_OFFSET);
+
+    const startOfDayIST = new Date(istVirtualTime);
+    startOfDayIST.setUTCHours(0, 0, 0, 0);
+    const startOfDayUTC = new Date(startOfDayIST.getTime() - IST_OFFSET);
+
+    const endOfDayIST = new Date(startOfDayIST);
+    endOfDayIST.setUTCHours(23, 59, 59, 999);
+    const endOfDayUTC = new Date(endOfDayIST.getTime() - IST_OFFSET);
 
     const taskObj = await Task.findById(taskId);
     if (!taskObj) {
@@ -158,7 +165,7 @@ async function completeTask(req, res) {
     let instance = await TaskInstance.findOne({
       task: taskId,
       assignedTo: userId,
-      date: { $gte: startOfDay, $lte: endOfDay },
+      date: { $gte: startOfDayUTC, $lte: endOfDayUTC },
     });
 
     if (!instance) {
@@ -166,7 +173,7 @@ async function completeTask(req, res) {
         task: taskId,
         plan: taskObj.plan,
         assignedTo: userId,
-        date: startOfDay,
+        date: startOfDayUTC,
       });
     }
 
@@ -186,27 +193,27 @@ async function completeTask(req, res) {
     await Plan.findByIdAndUpdate(instance.plan, { $inc: { xp: 5 } });
 
     if (taskObj && taskObj.recurrence && taskObj.recurrence.isRecurring) {
+      // instance.date represents the start of day in IST logically stored in UTC (e.g., 18:30 UTC)
       let nextDate = new Date(instance.date);
 
       switch (taskObj.recurrence.type) {
         case "daily":
-          nextDate.setDate(nextDate.getDate() + (taskObj.recurrence.interval || 1));
+          nextDate.setUTCDate(nextDate.getUTCDate() + (taskObj.recurrence.interval || 1));
           break;
         case "weekly":
-          nextDate.setDate(nextDate.getDate() + 7 * (taskObj.recurrence.interval || 1));
+          nextDate.setUTCDate(nextDate.getUTCDate() + 7 * (taskObj.recurrence.interval || 1));
           break;
         case "monthly":
-          nextDate.setMonth(nextDate.getMonth() + (taskObj.recurrence.interval || 1));
+          nextDate.setUTCMonth(nextDate.getUTCMonth() + (taskObj.recurrence.interval || 1));
           break;
         case "custom":
-          nextDate.setDate(nextDate.getDate() + (taskObj.recurrence.interval || 1));
+          nextDate.setUTCDate(nextDate.getUTCDate() + (taskObj.recurrence.interval || 1));
           break;
       }
 
       if (!taskObj.recurrence.endDate || nextDate <= new Date(taskObj.recurrence.endDate)) {
-        nextDate.setHours(0, 0, 0, 0);
-        const endOfNextDay = new Date(nextDate);
-        endOfNextDay.setHours(23, 59, 59, 999);
+        // Because nextDate is mathematically anchored to IST midnight via UTC, we just construct bounds manually
+        const endOfNextDay = new Date(nextDate.getTime() + (24 * 60 * 60 * 1000) - 1);
 
         const existingNext = await TaskInstance.findOne({
           task: taskId,
@@ -498,9 +505,13 @@ async function rescheduleTaskInstance(req, res) {
       return res.status(400).json({ message: "Invalid date format" });
     }
 
-    parsedDate.setHours(0, 0, 0, 0);
+    const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+    const istVirtualTime = new Date(parsedDate.getTime() + IST_OFFSET);
+    const startOfDayIST = new Date(istVirtualTime);
+    startOfDayIST.setUTCHours(0, 0, 0, 0);
+    const startOfDayUTC = new Date(startOfDayIST.getTime() - IST_OFFSET);
 
-    instance.date = parsedDate;
+    instance.date = startOfDayUTC;
     await instance.save();
 
     try {
@@ -778,8 +789,16 @@ async function scheduleTaskInstances(req, res) {
     const created = [];
 
     while (current <= end) {
-      const dayStart = new Date(current); dayStart.setHours(0, 0, 0, 0);
-      const dayEnd   = new Date(current); dayEnd.setHours(23, 59, 59, 999);
+      const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+      const istVirtualTime = new Date(current.getTime() + IST_OFFSET);
+      
+      const startOfDayIST = new Date(istVirtualTime);
+      startOfDayIST.setUTCHours(0, 0, 0, 0);
+      const dayStart = new Date(startOfDayIST.getTime() - IST_OFFSET);
+      
+      const endOfDayIST = new Date(startOfDayIST);
+      endOfDayIST.setUTCHours(23, 59, 59, 999);
+      const dayEnd = new Date(endOfDayIST.getTime() - IST_OFFSET);
 
       for (const memberId of targets) {
         const exists = await TaskInstance.findOne({
@@ -792,7 +811,7 @@ async function scheduleTaskInstances(req, res) {
             task: taskId,
             plan: task.plan,
             assignedTo: memberId,
-            date: new Date(current),
+            date: dayStart,
           });
           created.push(inst);
         }
