@@ -30,7 +30,8 @@
             }
   Success : 200 → { message, token, user: { id, username, email, role, status } }
             Note: token is also set as an httpOnly cookie automatically
-  Errors  : 401 → User not found / Invalid credentials
+  Errors  : 401 → User not found / Invalid credentials,
+            403 → Verify your email first
 
 ── GET /api/auth/me ────────────────────────────────────────────────────────────
   Purpose : Verify token validity + get fresh user data (use on app reload)
@@ -45,6 +46,34 @@
   Body    : { "password": "secret123" }   (required to confirm identity)
   Success : 200 → { message: "User deleted successfully" }
   Errors  : 401 → Invalid password, 404 → User not found
+
+── POST /api/auth/google ───────────────────────────────────────────────────────
+  Purpose : Login or Register via Google OAuth
+  Auth    : Not required
+  Query   : code (required) → Authorization code from Google
+  Success : 200 → { message, token, user: { id, username, email, role, status } }
+            Note: token is also set as an httpOnly cookie automatically
+  Errors  : 403 → Account banned, 500 → Server error
+
+── POST /api/auth/verify-email ─────────────────────────────────────────────────
+  Purpose : Verify a new user's email using the code sent to their inbox
+  Auth    : Required pass JWT in header/cookie
+  Body    : {
+              "userId": "<user ObjectId>", (required)
+              "code": "123456"             (required, generated code)
+            }
+  Success : 200 → { message: "Email verified successfully. You can now log in." }
+  Errors  : 400 → Email already verified / Invalid verification code / Verification code expired,
+            404 → User not found
+
+── POST /api/auth/resend-verification ──────────────────────────────────────────
+  Purpose : Resend a new email verification code
+  Auth    : Required pass JWT in header/cookie
+  Body    : {
+              "userId": "<user ObjectId>"  (required)
+            }
+  Success : 200 → { message: "New verification code sent." }
+  Errors  : 400 → Email already verified, 404 → User not found
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

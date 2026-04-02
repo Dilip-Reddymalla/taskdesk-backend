@@ -62,7 +62,7 @@ async function sendInvite(req, res) {
       user: reciver._id,
       type: "invite_received",
       message: `you have recived inivite to a plan by ${req.user.username}`,
-      relatedId: planID,
+      relatedId: invite._id,
     });
     res.status(201).json({
       message: "Invite send succsefully",
@@ -109,12 +109,9 @@ async function acceptInvite(req, res) {
   try {
     const userId = req.user.id;
     const inviteId = req.params.inviteId;
-    const { planId } = req.body;
+
     if (!inviteId) {
       return res.status(400).json({ message: "invite id required" });
-    }
-    if (!planId) {
-      return res.status(409).json({ message: "plan id required" });
     }
     if (!userId) {
       return res.status(409).json({ message: "User id required" });
@@ -130,6 +127,10 @@ async function acceptInvite(req, res) {
         .status(409)
         .json({ message: "the invite does not belong to you" });
     }
+    
+    // Fallback to invite.plan if planId is missing from request body
+    const planId = req.body.planId || invite.plan;
+    
     const plan = await planModel.findById(planId);
     if (!plan) return res.status(404).json({ message: "plan not found" });
     if (plan.owner.toString() !== invite.sender.toString())

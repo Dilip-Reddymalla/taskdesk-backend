@@ -20,6 +20,13 @@ const taskInstanceSchema = new mongoose.Schema(
       required: true,
     },
 
+    title: { type: String },
+    description: { type: String },
+    priority: { 
+      type: String, 
+      enum: ["low", "medium", "high"] 
+    },
+
     date: {
       type: Date,
       required: true,

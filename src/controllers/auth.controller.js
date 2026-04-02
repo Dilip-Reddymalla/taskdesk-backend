@@ -5,7 +5,8 @@ const Plan = require("../models/plan.model.js");
 const Task = require("../models/task.model.js");
 const { OAuth2Client } = require("google-auth-library");
 const { axios } = require("axios");
-
+const { generateVerificationCode } = require("../utils/generateCode.js");
+const { sendVerificationEmail } = require("../utils/sendEmail.js");
 async function registerUser(req, res) {
   try {
     let { username, email, password } = req.body;
@@ -83,9 +84,9 @@ async function loginUser(req, res) {
         message: "Invaid Credentials",
       });
     }
-    if(!uses.isEmailVerified){
-      return res.status(403).json({message:"Verify your email first"});
-    }
+    // if(!user.isEmailVerified){
+    //   return res.status(403).json({message:"Verify your email first"});
+    // }
     const token = jwt.sign(
       {
         id: user._id,

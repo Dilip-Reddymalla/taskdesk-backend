@@ -4,7 +4,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendVerificationEmail(email, username, code) {
   await resend.emails.send({
-    from: "yourapp@yourdomain.com", // or onboarding@resend.dev for testing
+    from: "taskdesk@tesk-desk.vercel.app", // or onboarding@resend.dev for testing
     to: email,
     subject: "Verify your email",
     html: `

@@ -80,6 +80,9 @@ async function createTask(req, res) {
     if (startDate && endDate) {
       let current = new Date(startDate);
       const end = new Date(endDate);
+      const isRec = recurrence && recurrence.isRecurring;
+      const rType = isRec ? recurrence.type : "daily";
+      const rInterval = isRec ? (recurrence.interval || 1) : 1;
 
       while (current <= end) {
         await TaskInstance.create({
@@ -89,8 +92,24 @@ async function createTask(req, res) {
           date: new Date(current),
         });
 
-        current.setDate(current.getDate() + 1);
+        if (rType === "daily") {
+          current.setDate(current.getDate() + rInterval);
+        } else if (rType === "weekly") {
+          current.setDate(current.getDate() + 7 * rInterval);
+        } else if (rType === "monthly") {
+          current.setMonth(current.getMonth() + rInterval);
+        } else {
+          current.setDate(current.getDate() + rInterval);
+        }
       }
+    } else {
+      // Create a single instance immediately for 'Today' if no date range is provided
+      await TaskInstance.create({
+        task: task._id,
+        plan: task.plan,
+        assignedTo: userId,
+        date: new Date(),
+      });
     }
 
     try {
@@ -228,18 +247,30 @@ async function getPendingTasks(req, res) {
     const [tasks, total] = await Promise.all([
       TaskInstance.find({ assignedTo: userId, isCompleted: false })
         .populate("task", "title description priority recurrence")
+        .populate("plan", "title")
         .sort({ date: 1 })
         .skip(skip)
         .limit(limit),
       TaskInstance.countDocuments({ assignedTo: userId, isCompleted: false }),
     ]);
 
+    const validTasks = [];
+    const orphans = [];
+    tasks.forEach(t => {
+      if (!t.task) orphans.push(t._id);
+      else validTasks.push(t);
+    });
+
+    if (orphans.length > 0) {
+      await TaskInstance.deleteMany({ _id: { $in: orphans } });
+    }
+
     res.status(200).json({
       message: "Tasks fetched",
       page,
       totalPages: Math.ceil(total / limit),
-      totalCount: total,
-      tasks,
+      totalCount: total - orphans.length,
+      tasks: validTasks,
     });
   } catch (error) {
     res.status(500).json({ message: "Server error" });
@@ -260,18 +291,30 @@ async function getCompletedTasks(req, res) {
     const [tasks, total] = await Promise.all([
       TaskInstance.find({ assignedTo: userId, isCompleted: true })
         .populate("task", "title description priority recurrence")
+        .populate("plan", "title")
         .sort({ completedAt: -1 })
         .skip(skip)
         .limit(limit),
       TaskInstance.countDocuments({ assignedTo: userId, isCompleted: true }),
     ]);
 
+    const validTasks = [];
+    const orphans = [];
+    tasks.forEach(t => {
+      if (!t.task) orphans.push(t._id);
+      else validTasks.push(t);
+    });
+
+    if (orphans.length > 0) {
+      await TaskInstance.deleteMany({ _id: { $in: orphans } });
+    }
+
     res.status(200).json({
       message: "Tasks fetched",
       page,
       totalPages: Math.ceil(total / limit),
-      totalCount: total,
-      tasks,
+      totalCount: total - orphans.length,
+      tasks: validTasks,
     });
   } catch (error) {
     res.status(500).json({ message: "Server error" });
@@ -291,19 +334,47 @@ async function deleteTask(req, res) {
     if (task.createdBy.toString() !== userId.toString()) {
       return res.status(403).json({ message: "user does not have access" });
     }
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // normalize to start of day
-
     await TaskInstance.deleteMany({
       task: taskId,
-      date: { $gte: today },
-      isCompleted: false,
     });
 
     await task.deleteOne();
-    res.status(200).json({ message: "task deleted" });
+    res.status(200).json({ message: "Task deleted successfully" });
   } catch (error) {
-    console.log("[task contriller]:", error);
+    console.log("[task controller:]", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+async function deleteTaskInstance(req, res) {
+  try {
+    const instanceId = req.params.instanceId;
+    const userId = req.user.id;
+
+    if (!instanceId) {
+      return res.status(401).json({ message: "ID is required" });
+    }
+
+    const instance = await TaskInstance.findById(instanceId);
+    if (!instance) {
+      return res.status(404).json({ message: "Task instance not found" });
+    }
+
+    if (instance.assignedTo.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "Unauthorized to delete task" });
+    }
+
+    const parentTaskId = instance.task;
+    await instance.deleteOne();
+
+    const remainingCounts = await TaskInstance.countDocuments({ task: parentTaskId });
+    if (remainingCounts === 0) {
+      await Task.findByIdAndDelete(parentTaskId);
+    }
+
+    res.status(200).json({ message: "Task instance deleted successfully" });
+  } catch (error) {
+    console.log("[task controller:]", error);
     res.status(500).json({ message: "Server error" });
   }
 }
@@ -527,15 +598,114 @@ async function searchTasks(req, res) {
   }
 }
 
+async function getAllTasks(req, res) {
+  try {
+    const userId = req.user.id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = 20;
+    const skip = (page - 1) * limit;
+
+    const [tasks, total] = await Promise.all([
+      TaskInstance.find({ assignedTo: userId })
+        .populate("task", "title description priority recurrence")
+        .populate("plan", "title")
+        .sort({ date: 1 })
+        .skip(skip)
+        .limit(limit),
+      TaskInstance.countDocuments({ assignedTo: userId }),
+    ]);
+
+    const validTasks = [];
+    const orphans = [];
+    tasks.forEach(t => {
+      if (!t.task) orphans.push(t._id);
+      else validTasks.push(t);
+    });
+
+    if (orphans.length > 0) {
+      await TaskInstance.deleteMany({ _id: { $in: orphans } });
+    }
+
+    res.status(200).json({
+      message: "All tasks fetched",
+      page,
+      totalPages: Math.ceil(total / limit),
+      totalCount: total - orphans.length,
+      tasks: validTasks,
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+async function editTaskInstance(req, res) {
+  try {
+    const instanceId = req.params.instanceId;
+    const { updateType, title, description, priority, date } = req.body;
+    const userId = req.user.id;
+
+    const instance = await TaskInstance.findById(instanceId).populate("task");
+    if (!instance) return res.status(404).json({ message: "Instance not found" });
+
+    if (instance.assignedTo.toString() !== userId.toString() && instance.task?.createdBy?.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    if (updateType === 'single') {
+      if (title !== undefined) instance.title = title;
+      if (description !== undefined) instance.description = description;
+      if (priority !== undefined) instance.priority = priority;
+      if (date !== undefined) instance.date = new Date(date);
+      await instance.save();
+
+      try { getIO().to(`plan_${instance.plan}`).emit("task_updated", instance); } catch(e){}
+      return res.status(200).json({ message: "Task instance updated", instance });
+
+    } else if (updateType === 'future') {
+      const parentTask = await Task.findById(instance.task._id);
+      if (!parentTask) return res.status(404).json({ message: "Parent task missing" });
+
+      if (title !== undefined) parentTask.title = title;
+      if (description !== undefined) parentTask.description = description;
+      if (priority !== undefined) parentTask.priority = priority;
+      await parentTask.save();
+
+      const futureQuery = {
+        task: parentTask._id,
+        date: { $gte: instance.date }
+      };
+
+      await TaskInstance.updateMany(futureQuery, {
+        $unset: { title: "", description: "", priority: "" }
+      });
+
+      if (date !== undefined) {
+         instance.date = new Date(date);
+         await instance.save();
+      }
+
+      try { getIO().to(`plan_${instance.plan}`).emit("task_updated", instance); } catch(e){}
+      return res.status(200).json({ message: "Series updated", instance });
+    }
+
+    res.status(400).json({ message: "Invalid updateType. Must be 'single' or 'future'." });
+  } catch(error) {
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
 module.exports = {
   createTask,
   completeTask,
   getPendingTasks,
   getCompletedTasks,
+  getAllTasks,
   deleteTask,
+  deleteTaskInstance,
   addUploadedFile,
   updateTask,
   rescheduleTaskInstance,
+  editTaskInstance,
   getCalendarTasks,
   searchTasks,
 };
